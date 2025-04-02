@@ -127,7 +127,7 @@ namespace ImageProcessor
     std::string Image::getInfo() const
     {
         std::stringstream ss;
-        ss << "Dimensiones originales: " << width << " x " << height << std::endl;
+        ss << "Dimensiones: " << width << " x " << height << std::endl;
         ss << "Canales: " << channels << " (";
 
         if (channels == 1)
@@ -227,6 +227,44 @@ namespace ImageProcessor
 
         std::cout << "[INFO] Imagen rotada correctamente " << angleDegrees << " grados."
                   << std::endl;
+    }
+
+    void Image::scaleImage(float factor)
+    {
+        // Calcular las nuevas dimensiones
+        int newWidth  = static_cast<int>(width * factor);
+        int newHeight = static_cast<int>(height * factor);
+
+        // Crear una nueva imagen con las dimensiones escaladas
+        Image scaledImage;
+        scaledImage.width    = newWidth;
+        scaledImage.height   = newHeight;
+        scaledImage.channels = channels;
+        scaledImage.allocateMemory();
+
+        // Para cada píxel en la imagen de salida
+        for (int y = 0; y < newHeight; y++)
+        {
+            for (int x = 0; x < newWidth; x++)
+            {
+                // Calcular las coordenadas en la imagen original
+                float srcX = x / factor;
+                float srcY = y / factor;
+
+                // Aplicar interpolación bilineal para cada canal
+                for (int c = 0; c < channels; c++)
+                {
+                    scaledImage.pixels[y][x][c] = bilinearInterpolation(srcX, srcY, c);
+                }
+            }
+        }
+
+        // Copiar la imagen escalada de vuelta a la imagen original
+        *this = scaledImage;
+
+        std::cout << "[INFO] Imagen escalada correctamente con factor " << factor << "."
+                  << std::endl;
+        std::cout << "Nuevas dimensiones: " << newWidth << " x " << newHeight << std::endl;
     }
 
 } // namespace ImageProcessor

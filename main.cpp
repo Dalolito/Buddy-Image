@@ -77,7 +77,9 @@ int main(int argc, char *argv[])
     std::cout << "=== PROCESAMIENTO DE IMAGEN ===" << std::endl;
     std::cout << "Archivo de entrada: " << inputFile << std::endl;
     std::cout << "Archivo de salida: " << outputFile << std::endl;
+    std::cout << "Modo de asignación de memoria: " << (useBuddySystem ? "Buddy System" : "Convencional") << std::endl;
     std::cout << "------------------------" << std::endl;
+    std::cout << "Dimensiones originales: " << image.width << " x " << image.height << std::endl;
     std::cout << image.getInfo() << std::endl;
     std::cout << "------------------------" << std::endl;
 
@@ -88,7 +90,16 @@ int main(int argc, char *argv[])
         image.rotateImage(rotationAngle);
     }
 
-    // Por ahora solo implementamos la rotación, el escalado lo dejaremos para la siguiente parte
+    // Aplicar escalado si se especificó un factor diferente de 1.0
+    if (scaleFactor != 1.0f)
+    {
+        std::cout << "Factor de escalado: " << scaleFactor << std::endl;
+        image.scaleImage(scaleFactor);
+    }
+    
+    // Mostrar dimensiones finales después de las transformaciones
+    std::cout << "Dimensiones finales: " << image.width << " x " << image.height << std::endl;
+
     std::cout << "Guardando imagen en: " << outputFile << std::endl;
     if (!FileIO::saveImage(outputFile, image))
     {

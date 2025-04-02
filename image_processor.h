@@ -36,6 +36,9 @@ namespace ImageProcessor
             // Rota la imagen alrededor de su centro por un ángulo dado en grados
             void rotateImage(float angleDegrees);
 
+            // Escala la imagen por un factor dado
+            void scaleImage(float factor);
+
             // Método auxiliar para la interpolación bilineal
             unsigned char bilinearInterpolation(float x, float y, int channel);
     };
