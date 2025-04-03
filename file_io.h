@@ -8,7 +8,7 @@
 namespace FileIO
 {
     // Carga una imagen desde un archivo y la convierte al formato interno
-    bool loadImage(const std::string &filename, ImageProcessor::Image &image);
+    bool loadImage(const std::string &filename, ImageProcessor::Image &image, bool useBuddySystem = false);
 
     // Guarda una imagen procesada a un archivo
     bool saveImage(const std::string &filename, const ImageProcessor::Image &image);

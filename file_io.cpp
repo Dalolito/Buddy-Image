@@ -12,7 +12,7 @@
 namespace FileIO
 {
 
-    bool loadImage(const std::string &filename, ImageProcessor::Image &image)
+    bool loadImage(const std::string &filename, ImageProcessor::Image &image, bool useBuddySystem)
     {
         int width, height, channels;
 
@@ -30,7 +30,7 @@ namespace FileIO
         image.width    = width;
         image.height   = height;
         image.channels = channels;
-        image.allocateMemory();
+        image.allocateMemory(useBuddySystem);  // Pasar el modo de asignación
 
         // Copia los datos al formato de nuestra matriz tridimensional
         for (int y = 0; y < height; y++)

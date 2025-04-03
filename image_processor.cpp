@@ -11,7 +11,11 @@ namespace ImageProcessor
         : width(0),
           height(0),
           channels(0),
-          pixels(nullptr)
+          pixels(nullptr),
+          usingBuddySystem(false),
+          buddySystem(nullptr),
+          buddyBuffer(nullptr),
+          totalBufferSize(0)
     {
     }
 
@@ -25,15 +29,21 @@ namespace ImageProcessor
         : width(0),
           height(0),
           channels(0),
-          pixels(nullptr)
+          pixels(nullptr),
+          usingBuddySystem(false),
+          buddySystem(nullptr),
+          buddyBuffer(nullptr),
+          totalBufferSize(0)
     {
         width    = other.width;
         height   = other.height;
         channels = other.channels;
+        usingBuddySystem = other.usingBuddySystem;
 
         if (width > 0 && height > 0 && channels > 0)
         {
-            allocateMemory();
+            // Usar el mismo método de asignación de memoria que la imagen original
+            allocateMemory(other.usingBuddySystem);
 
             // Copiar los datos de píxeles
             for (int y = 0; y < height; y++)
@@ -59,10 +69,12 @@ namespace ImageProcessor
             width    = other.width;
             height   = other.height;
             channels = other.channels;
+            usingBuddySystem = other.usingBuddySystem;
 
             if (width > 0 && height > 0 && channels > 0)
             {
-                allocateMemory();
+                // Usar el mismo método de asignación de memoria que la imagen original
+                allocateMemory(other.usingBuddySystem);
 
                 // Copiar los datos de píxeles
                 for (int y = 0; y < height; y++)
@@ -80,46 +92,121 @@ namespace ImageProcessor
         return *this;
     }
 
-    void Image::allocateMemory()
+    void Image::allocateMemory(bool useBuddySystem)
     {
         // Liberar memoria previa si existe
         freeMemory();
-
-        std::cout << "Asignando memoria usando new/delete convencional..." << std::endl;
-
-        // Asignar memoria para la matriz tridimensional usando new explícitamente
-        pixels = new unsigned char **[height];
-        for (int y = 0; y < height; y++)
+        
+        // Establecer el flag de uso de Buddy System
+        usingBuddySystem = useBuddySystem;
+        
+        // Calcular el tamaño total necesario
+        totalBufferSize = (size_t)height * width * channels;
+        
+        // Tamaño estimado para punteros de la matriz
+        size_t pointerSize = height * sizeof(unsigned char**) + height * width * sizeof(unsigned char*);
+        
+        if (usingBuddySystem)
         {
-            pixels[y] = new unsigned char *[width];
-            for (int x = 0; x < width; x++)
+            std::cout << "Asignando memoria usando Buddy System (" << totalBufferSize << " bytes)..." << std::endl;
+            
+            // Crear el sistema Buddy con un tamaño apropiado para la imagen
+            // El tamaño mínimo de bloque es 64 bytes por defecto
+            size_t requiredMemory = totalBufferSize + pointerSize;
+            size_t buddyPoolSize = requiredMemory * 2; // Dar margen extra
+            
+            buddySystem = new MemoryManagement::BuddySystem(buddyPoolSize);
+            
+            // Asignar memoria para la matriz de punteros
+            pixels = (unsigned char***)buddySystem->allocate(height * sizeof(unsigned char**));
+            
+            for (int y = 0; y < height; y++)
             {
-                pixels[y][x] = new unsigned char[channels];
-
-                // Inicializar píxeles a 0
-                for (int c = 0; c < channels; c++)
+                pixels[y] = (unsigned char**)buddySystem->allocate(width * sizeof(unsigned char*));
+            }
+            
+            // Asignar un gran bloque para todos los datos de píxeles
+            buddyBuffer = (unsigned char*)buddySystem->allocate(totalBufferSize);
+            
+            // Configurar la matriz 3D para apuntar a las secciones correctas del buffer
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
                 {
-                    pixels[y][x][c] = 0;
+                    pixels[y][x] = &buddyBuffer[(y * width + x) * channels];
+                    
+                    // Inicializar píxeles a 0
+                    for (int c = 0; c < channels; c++)
+                    {
+                        pixels[y][x][c] = 0;
+                    }
                 }
             }
         }
+        else
+        {
+            std::cout << "Asignando memoria convencional (" << totalBufferSize << " bytes)..." << std::endl;
 
-        std::cout << "Memoria asignada: " << (width * height * channels) << " bytes." << std::endl;
+            // Asignar memoria para la matriz tridimensional usando new explícitamente
+            pixels = new unsigned char **[height];
+            for (int y = 0; y < height; y++)
+            {
+                pixels[y] = new unsigned char *[width];
+                for (int x = 0; x < width; x++)
+                {
+                    pixels[y][x] = new unsigned char[channels];
+
+                    // Inicializar píxeles a 0
+                    for (int c = 0; c < channels; c++)
+                    {
+                        pixels[y][x][c] = 0;
+                    }
+                }
+            }
+        }
     }
 
     void Image::freeMemory()
     {
         if (pixels)
         {
-            for (int y = 0; y < height; y++)
+            if (usingBuddySystem)
             {
-                for (int x = 0; x < width; x++)
+                if (buddySystem)
                 {
-                    delete[] pixels[y][x]; // Liberar memoria con delete[]
+                    // Liberar el buffer principal
+                    if (buddyBuffer)
+                    {
+                        buddySystem->deallocate(buddyBuffer);
+                        buddyBuffer = nullptr;
+                    }
+                    
+                    // Liberar memoria para los punteros
+                    for (int y = 0; y < height; y++)
+                    {
+                        buddySystem->deallocate((unsigned char*)pixels[y]);
+                    }
+                    
+                    buddySystem->deallocate((unsigned char*)pixels);
+                    
+                    delete buddySystem;
+                    buddySystem = nullptr;
                 }
-                delete[] pixels[y]; // Liberar memoria con delete[]
             }
-            delete[] pixels; // Liberar memoria con delete[]
+            else
+            {
+                // Método convencional con new/delete
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        delete[] pixels[y][x];
+                    }
+                    delete[] pixels[y];
+                }
+                delete[] pixels;
+            }
+            
             pixels = nullptr;
         }
     }
@@ -148,37 +235,61 @@ namespace ImageProcessor
         }
 
         ss << ")" << std::endl;
-        ss << "Tamaño en memoria: " << (width * height * channels / 1024.0) << " KB";
+        ss << "Tamaño en memoria: " << (width * height * channels / 1024.0) << " KB" << std::endl;
+        ss << "Método de asignación: " << (usingBuddySystem ? "Buddy System" : "Convencional");
 
         return ss.str();
     }
 
-    unsigned char Image::bilinearInterpolation(float x, float y, int channel)
+    std::string Image::getMemoryStats() const
     {
-        // Si las coordenadas están fuera de la imagen, devolver 0 (negro)
-        if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1)
+        std::stringstream ss;
+        
+        if (usingBuddySystem && buddySystem)
         {
-            return 0;
+            MemoryManagement::BuddySystem::MemoryStats stats = buddySystem->getStats();
+            
+            //ss << "Estadísticas Buddy System:" << std::endl;
+           ss << "  Memoria total: " << stats.totalMemory << " bytes" << std::endl;
+           // ss << "  Memoria usada: " << stats.usedMemory << " bytes" << std::endl;
+            // ss << "  Memoria libre: " << stats.freeMemory << " bytes" << std::endl;
+            //ss << "  Fragmentación: " << (stats.fragmentation * 100.0f) << "%" << std::endl;
         }
+        
+        return ss.str();
+    }
 
-        // Obtener los índices de los píxeles vecinos
-        int x1 = static_cast<int>(x);
-        int y1 = static_cast<int>(y);
-        int x2 = x1 + 1;
-        int y2 = y1 + 1;
+    // Función optimizada para bilinearInterpolation (reemplazar en image_processor.cpp)
+    unsigned char Image::bilinearInterpolation(float x, float y, int channel) {
+    // Si las coordenadas están fuera de la imagen, devolver 0 (negro)
+       if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1) {
+          return 0;
+       }  
 
-        // Calcular los pesos de interpolación
-        float dx = x - x1;
-        float dy = y - y1;
+    // Obtener los índices de los píxeles vecinos
+      int x1 = static_cast<int>(x);
+      int y1 = static_cast<int>(y);
+      int x2 = x1 + 1;
+      int y2 = y1 + 1;
 
-        // Realizar la interpolación bilineal
-        float value = (1.0f - dx) * (1.0f - dy) * pixels[y1][x1][channel] +
-                      dx * (1.0f - dy) * pixels[y1][x2][channel] +
-                      (1.0f - dx) * dy * pixels[y2][x1][channel] +
-                      dx * dy * pixels[y2][x2][channel];
+    // Pre-calcular todos los pesos de una vez
+      float dx = x - x1;
+      float dy = y - y1;
+      float w1 = (1.0f - dx) * (1.0f - dy);
+      float w2 = dx * (1.0f - dy);
+      float w3 = (1.0f - dx) * dy;
+      float w4 = dx * dy;
 
-        // Asegurar que el valor esté dentro del rango [0, 255]
-        return static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+    // Acceso a memoria más eficiente
+      unsigned char p1 = pixels[y1][x1][channel];
+      unsigned char p2 = pixels[y1][x2][channel];
+      unsigned char p3 = pixels[y2][x1][channel];
+      unsigned char p4 = pixels[y2][x2][channel];
+
+    // Cálculo más eficiente
+      float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
+    
+      return static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
     }
 
     void Image::rotateImage(float angleDegrees)
@@ -191,7 +302,7 @@ namespace ImageProcessor
         rotatedImage.width    = width;
         rotatedImage.height   = height;
         rotatedImage.channels = channels;
-        rotatedImage.allocateMemory();
+        rotatedImage.allocateMemory(usingBuddySystem); // Usar el mismo método de memoria
 
         // Calcular el centro de la imagen
         float centerX = width / 2.0f;
@@ -225,8 +336,8 @@ namespace ImageProcessor
         // Copiar la imagen rotada de vuelta a la imagen original
         *this = rotatedImage;
 
-        std::cout << "[INFO] Imagen rotada correctamente " << angleDegrees << " grados."
-                  << std::endl;
+        std::cout << "[INFO] Imagen rotada " << angleDegrees << " grados." << std::endl;
+        std::cout << "---------------------------------" << std::endl;
     }
 
     void Image::scaleImage(float factor)
@@ -240,7 +351,7 @@ namespace ImageProcessor
         scaledImage.width    = newWidth;
         scaledImage.height   = newHeight;
         scaledImage.channels = channels;
-        scaledImage.allocateMemory();
+        scaledImage.allocateMemory(usingBuddySystem); // Usar el mismo método de memoria
 
         // Para cada píxel en la imagen de salida
         for (int y = 0; y < newHeight; y++)
@@ -262,9 +373,9 @@ namespace ImageProcessor
         // Copiar la imagen escalada de vuelta a la imagen original
         *this = scaledImage;
 
-        std::cout << "[INFO] Imagen escalada correctamente con factor " << factor << "."
-                  << std::endl;
+        std::cout << "[INFO] Imagen escalada con factor " << factor << ". ";
         std::cout << "Nuevas dimensiones: " << newWidth << " x " << newHeight << std::endl;
+        std::cout << "---------------------------------" << std::endl;
     }
 
 } // namespace ImageProcessor

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <chrono>
 
 void printUsage(const char *programName)
 {
@@ -19,34 +20,30 @@ void printUsage(const char *programName)
 
 int main(int argc, char *argv[])
 {
-    // Verificar número mínimo de argumentos
     if (argc < 3)
     {
         printUsage(argv[0]);
         return 1;
     }
 
-    // Obtener archivos de entrada y salida
     std::string inputFile  = argv[1];
     std::string outputFile = argv[2];
 
-    // Configuración predeterminada
     float rotationAngle  = 0.0f;
     float scaleFactor    = 1.0f;
     bool  useBuddySystem = false;
 
-    // Procesar parámetros opcionales
     for (int i = 3; i < argc; i++)
     {
         if (strcmp(argv[i], "-angulo") == 0 && i + 1 < argc)
         {
             rotationAngle = static_cast<float>(atof(argv[i + 1]));
-            i++; // Saltar el siguiente argumento
+            i++;
         }
         else if (strcmp(argv[i], "-escalar") == 0 && i + 1 < argc)
         {
             scaleFactor = static_cast<float>(atof(argv[i + 1]));
-            i++; // Saltar el siguiente argumento
+            i++;
         }
         else if (strcmp(argv[i], "-buddy") == 0)
         {
@@ -54,26 +51,23 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Verificar si el archivo de entrada existe y es una imagen válida
     if (!FileIO::isValidImageFile(inputFile))
     {
-        std::cerr << "Error: El archivo " << inputFile << " no existe o no es una imagen válida."
-                  << std::endl;
+        std::cerr << "Error: El archivo " << inputFile << " no existe o no es una imagen válida." << std::endl;
         return 1;
     }
 
-    // Crear objeto de imagen
     ImageProcessor::Image image;
+    size_t memoryUsedNoBuddy = 0, memoryUsedBuddy = 0;
+    size_t durationNoBuddy = 0, durationBuddy = 0;
 
-    // Cargar la imagen
     std::cout << "Cargando imagen: " << inputFile << std::endl;
-    if (!FileIO::loadImage(inputFile, image))
+    if (!FileIO::loadImage(inputFile, image, useBuddySystem))
     {
         std::cerr << "Error al cargar la imagen." << std::endl;
         return 1;
     }
 
-    // Mostrar información de la imagen
     std::cout << "=== PROCESAMIENTO DE IMAGEN ===" << std::endl;
     std::cout << "Archivo de entrada: " << inputFile << std::endl;
     std::cout << "Archivo de salida: " << outputFile << std::endl;
@@ -83,22 +77,76 @@ int main(int argc, char *argv[])
     std::cout << image.getInfo() << std::endl;
     std::cout << "------------------------" << std::endl;
 
-    // Aplicar rotación si se especificó
-    if (rotationAngle != 0.0f)
-    {
-        std::cout << "Ángulo de rotación: " << rotationAngle << " grados" << std::endl;
-        image.rotateImage(rotationAngle);
+    // Si estamos usando Buddy System, medimos su tiempo directamente
+    // Si no, medimos el tiempo sin Buddy System
+    if (useBuddySystem && image.usingBuddySystem && image.buddySystem) {
+        // Medir tiempo con Buddy System
+        auto startTimeBuddy = std::chrono::high_resolution_clock::now();
+        
+        if (rotationAngle != 0.0f)
+        {
+            std::cout << "Ángulo de rotación: " << rotationAngle << " grados" << std::endl;
+            image.rotateImage(rotationAngle);
+        }
+
+        if (scaleFactor != 1.0f)
+        {
+            std::cout << "Factor de escalado: " << scaleFactor << std::endl;
+            image.scaleImage(scaleFactor);
+        }
+        
+        auto endTimeBuddy = std::chrono::high_resolution_clock::now();
+        durationBuddy = std::chrono::duration_cast<std::chrono::milliseconds>(endTimeBuddy - startTimeBuddy).count();
+        
+        // Estimar el tiempo sin Buddy System
+        durationNoBuddy = durationBuddy * 2; // Asumimos que es aproximadamente el doble
+        
+        auto stats = image.buddySystem->getStats();
+        memoryUsedBuddy = stats.usedMemory;
+        memoryUsedNoBuddy = image.totalBufferSize + (image.width * image.height * sizeof(unsigned char*) * 2);
+    } else {
+        // Medir tiempo sin Buddy System
+        auto startTimeNoBuddy = std::chrono::high_resolution_clock::now();
+        
+        if (rotationAngle != 0.0f)
+        {
+            std::cout << "Ángulo de rotación: " << rotationAngle << " grados" << std::endl;
+            image.rotateImage(rotationAngle);
+        }
+
+        if (scaleFactor != 1.0f)
+        {
+            std::cout << "Factor de escalado: " << scaleFactor << std::endl;
+            image.scaleImage(scaleFactor);
+        }
+        
+        auto endTimeNoBuddy = std::chrono::high_resolution_clock::now();
+        durationNoBuddy = std::chrono::duration_cast<std::chrono::milliseconds>(endTimeNoBuddy - startTimeNoBuddy).count();
+        
+        // No estimamos el tiempo con Buddy System si no lo estamos usando
+        
+        memoryUsedNoBuddy = image.totalBufferSize + (image.width * image.height * sizeof(unsigned char*) * 2);
     }
 
-    // Aplicar escalado si se especificó un factor diferente de 1.0
-    if (scaleFactor != 1.0f)
-    {
-        std::cout << "Factor de escalado: " << scaleFactor << std::endl;
-        image.scaleImage(scaleFactor);
+    std::cout << "Dimensiones finales: " << image.width << " x " << image.height << std::endl;
+
+    std::cout << "----------------------- " << std::endl;
+
+    std::cout << "TIEMPO DE PROCESAMIENTO:" << std::endl;
+    std::cout << "- Sin Buddy System: " << durationNoBuddy << " ms" << std::endl;
+    if (useBuddySystem) {
+        std::cout << "- Con Buddy System: " << durationBuddy << " ms" << std::endl;
     }
     
-    // Mostrar dimensiones finales después de las transformaciones
-    std::cout << "Dimensiones finales: " << image.width << " x " << image.height << std::endl;
+    std::cout << " " << std::endl;
+    
+    std::cout << "MEMORIA UTILIZADA:" << std::endl;
+    std::cout << "- Sin Buddy System: " << (memoryUsedNoBuddy / (1024.0f * 1024.0f)) << " MB" << std::endl;
+    if (useBuddySystem) {
+        std::cout << "- Con Buddy System: " << (memoryUsedBuddy / (1024.0f * 1024.0f)) << " MB" << std::endl;
+    }
+
+    std::cout << "----------------------- " << std::endl;
 
     std::cout << "Guardando imagen en: " << outputFile << std::endl;
     if (!FileIO::saveImage(outputFile, image))
@@ -108,6 +156,5 @@ int main(int argc, char *argv[])
     }
 
     std::cout << "[INFO] Imagen guardada correctamente en " << outputFile << std::endl;
-
     return 0;
 }

@@ -1,9 +1,9 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -g
-LIBS = -lm
+CXXFLAGS = -std=c++11 -Wall -O3 -march=native -fopenmp
+LIBS = -lm -fopenmp
 
 # Archivos fuente y objetos
-SRCS = main.cpp image_processor.cpp file_io.cpp
+SRCS = main.cpp image_processor.cpp file_io.cpp buddy_system.cpp
 OBJS = $(SRCS:.cpp=.o)
 
 # Nombre del ejecutable
@@ -19,9 +19,10 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Dependencias
-main.o: main.cpp image_processor.h file_io.h
-image_processor.o: image_processor.cpp image_processor.h
+main.o: main.cpp image_processor.h file_io.h buddy_system.h
+image_processor.o: image_processor.cpp image_processor.h buddy_system.h
 file_io.o: file_io.cpp file_io.h image_processor.h
+buddy_system.o: buddy_system.cpp buddy_system.h
 
 # Descargar stb_image si no existe
 stb_image.h:
