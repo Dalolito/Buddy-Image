@@ -4,8 +4,16 @@
 #include <iostream>
 #include <sstream>
 
+// Verificar si OpenMP está disponible
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 namespace ImageProcessor
 {
+    // Inicialización de variables estáticas
+    bool Image::useParallelization = true;
+    int Image::numThreads = 4;
 
     Image::Image()
         : width(0),
@@ -22,6 +30,19 @@ namespace ImageProcessor
     Image::~Image()
     {
         freeMemory();
+    }
+
+    // Establecer paralelización y número de hilos
+    void Image::setParallelization(bool use, int threads)
+    {
+        useParallelization = use;
+        numThreads = threads;
+        
+        #if defined(_OPENMP)
+        if (use) {
+            omp_set_num_threads(threads);
+        }
+        #endif
     }
 
     // Implementación del constructor de copia
@@ -46,13 +67,33 @@ namespace ImageProcessor
             allocateMemory(other.usingBuddySystem);
 
             // Copiar los datos de píxeles
-            for (int y = 0; y < height; y++)
+            const int BLOCK_SIZE = 64; // Tamaño de bloque óptimo para caché
+            
+            #if defined(_OPENMP)
+            if (useParallelization) {
+                #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+                for (int blockY = 0; blockY < height; blockY += BLOCK_SIZE) {
+                    for (int blockX = 0; blockX < width; blockX += BLOCK_SIZE) {
+                        int endY = std::min(blockY + BLOCK_SIZE, height);
+                        int endX = std::min(blockX + BLOCK_SIZE, width);
+                        
+                        for (int y = blockY; y < endY; y++) {
+                            for (int x = blockX; x < endX; x++) {
+                                for (int c = 0; c < channels; c++) {
+                                    pixels[y][x][c] = other.pixels[y][x][c];
+                                }
+                            }
+                        }
+                    }
+                }
+            } else 
+            #endif
             {
-                for (int x = 0; x < width; x++)
-                {
-                    for (int c = 0; c < channels; c++)
-                    {
-                        pixels[y][x][c] = other.pixels[y][x][c];
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        for (int c = 0; c < channels; c++) {
+                            pixels[y][x][c] = other.pixels[y][x][c];
+                        }
                     }
                 }
             }
@@ -77,13 +118,33 @@ namespace ImageProcessor
                 allocateMemory(other.usingBuddySystem);
 
                 // Copiar los datos de píxeles
-                for (int y = 0; y < height; y++)
+                const int BLOCK_SIZE = 64; // Tamaño de bloque óptimo para caché
+                
+                #if defined(_OPENMP)
+                if (useParallelization) {
+                    #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+                    for (int blockY = 0; blockY < height; blockY += BLOCK_SIZE) {
+                        for (int blockX = 0; blockX < width; blockX += BLOCK_SIZE) {
+                            int endY = std::min(blockY + BLOCK_SIZE, height);
+                            int endX = std::min(blockX + BLOCK_SIZE, width);
+                            
+                            for (int y = blockY; y < endY; y++) {
+                                for (int x = blockX; x < endX; x++) {
+                                    for (int c = 0; c < channels; c++) {
+                                        pixels[y][x][c] = other.pixels[y][x][c];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else 
+                #endif
                 {
-                    for (int x = 0; x < width; x++)
-                    {
-                        for (int c = 0; c < channels; c++)
-                        {
-                            pixels[y][x][c] = other.pixels[y][x][c];
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++) {
+                            for (int c = 0; c < channels; c++) {
+                                pixels[y][x][c] = other.pixels[y][x][c];
+                            }
                         }
                     }
                 }
@@ -129,16 +190,30 @@ namespace ImageProcessor
             buddyBuffer = (unsigned char*)buddySystem->allocate(totalBufferSize);
             
             // Configurar la matriz 3D para apuntar a las secciones correctas del buffer
-            for (int y = 0; y < height; y++)
+            #if defined(_OPENMP)
+            if (useParallelization) {
+                #pragma omp parallel for schedule(dynamic)
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        pixels[y][x] = &buddyBuffer[(y * width + x) * channels];
+                        
+                        // Inicializar píxeles a 0
+                        for (int c = 0; c < channels; c++) {
+                            pixels[y][x][c] = 0;
+                        }
+                    }
+                }
+            } else 
+            #endif
             {
-                for (int x = 0; x < width; x++)
-                {
-                    pixels[y][x] = &buddyBuffer[(y * width + x) * channels];
-                    
-                    // Inicializar píxeles a 0
-                    for (int c = 0; c < channels; c++)
-                    {
-                        pixels[y][x][c] = 0;
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        pixels[y][x] = &buddyBuffer[(y * width + x) * channels];
+                        
+                        // Inicializar píxeles a 0
+                        for (int c = 0; c < channels; c++) {
+                            pixels[y][x][c] = 0;
+                        }
                     }
                 }
             }
@@ -249,93 +324,240 @@ namespace ImageProcessor
         {
             MemoryManagement::BuddySystem::MemoryStats stats = buddySystem->getStats();
             
-            //ss << "Estadísticas Buddy System:" << std::endl;
-           ss << "  Memoria total: " << stats.totalMemory << " bytes" << std::endl;
-           // ss << "  Memoria usada: " << stats.usedMemory << " bytes" << std::endl;
-            // ss << "  Memoria libre: " << stats.freeMemory << " bytes" << std::endl;
-            //ss << "  Fragmentación: " << (stats.fragmentation * 100.0f) << "%" << std::endl;
+            ss << "  Memoria total: " << stats.totalMemory << " bytes" << std::endl;
         }
         
         return ss.str();
     }
 
-    // Función optimizada para bilinearInterpolation (reemplazar en image_processor.cpp)
+    // Función optimizada para bilinearInterpolation
     unsigned char Image::bilinearInterpolation(float x, float y, int channel) {
-    // Si las coordenadas están fuera de la imagen, devolver 0 (negro)
-       if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1) {
-          return 0;
-       }  
+        // Si las coordenadas están fuera de la imagen, devolver 0 (negro)
+        if (x < 0 || y < 0 || x >= width - 1 || y >= height - 1) {
+            return 0;
+        }  
 
-    // Obtener los índices de los píxeles vecinos
-      int x1 = static_cast<int>(x);
-      int y1 = static_cast<int>(y);
-      int x2 = x1 + 1;
-      int y2 = y1 + 1;
+        // Obtener los índices de los píxeles vecinos
+        int x1 = static_cast<int>(x);
+        int y1 = static_cast<int>(y);
+        int x2 = x1 + 1;
+        int y2 = y1 + 1;
 
-    // Pre-calcular todos los pesos de una vez
-      float dx = x - x1;
-      float dy = y - y1;
-      float w1 = (1.0f - dx) * (1.0f - dy);
-      float w2 = dx * (1.0f - dy);
-      float w3 = (1.0f - dx) * dy;
-      float w4 = dx * dy;
+        // Pre-calcular todos los pesos de una vez
+        float dx = x - x1;
+        float dy = y - y1;
+        float w1 = (1.0f - dx) * (1.0f - dy);
+        float w2 = dx * (1.0f - dy);
+        float w3 = (1.0f - dx) * dy;
+        float w4 = dx * dy;
 
-    // Acceso a memoria más eficiente
-      unsigned char p1 = pixels[y1][x1][channel];
-      unsigned char p2 = pixels[y1][x2][channel];
-      unsigned char p3 = pixels[y2][x1][channel];
-      unsigned char p4 = pixels[y2][x2][channel];
+        // Acceso a memoria más eficiente
+        unsigned char p1 = pixels[y1][x1][channel];
+        unsigned char p2 = pixels[y1][x2][channel];
+        unsigned char p3 = pixels[y2][x1][channel];
+        unsigned char p4 = pixels[y2][x2][channel];
 
-    // Cálculo más eficiente
-      float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
+        // Cálculo más eficiente
+        float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
     
-      return static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+        return static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+    }
+
+    // Nueva función para procesamiento por bloques
+    void Image::bilinearInterpolationBlock(float* srcX, float* srcY, int startX, int startY, 
+                                          int blockWidth, int blockHeight, unsigned char* output) {
+        for (int y = 0; y < blockHeight; y++) {
+            for (int x = 0; x < blockWidth; x++) {
+                int outIdx = (y * blockWidth + x) * channels;
+                float xPos = srcX[y * blockWidth + x];
+                float yPos = srcY[y * blockWidth + x];
+                
+                // Si está fuera de la imagen, poner negro
+                if (xPos < 0 || yPos < 0 || xPos >= width - 1 || yPos >= height - 1) {
+                    for (int c = 0; c < channels; c++) {
+                        output[outIdx + c] = 0;
+                    }
+                    continue;
+                }
+                
+                // Calcular índices y pesos
+                int x1 = static_cast<int>(xPos);
+                int y1 = static_cast<int>(yPos);
+                int x2 = x1 + 1;
+                int y2 = y1 + 1;
+                
+                float dx = xPos - x1;
+                float dy = yPos - y1;
+                float w1 = (1.0f - dx) * (1.0f - dy);
+                float w2 = dx * (1.0f - dy);
+                float w3 = (1.0f - dx) * dy;
+                float w4 = dx * dy;
+                
+                // Procesar todos los canales
+                for (int c = 0; c < channels; c++) {
+                    unsigned char p1 = pixels[y1][x1][c];
+                    unsigned char p2 = pixels[y1][x2][c];
+                    unsigned char p3 = pixels[y2][x1][c];
+                    unsigned char p4 = pixels[y2][x2][c];
+                    
+                    float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
+                    output[outIdx + c] = static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+                }
+            }
+        }
     }
 
     void Image::rotateImage(float angleDegrees)
     {
         // Convertir ángulo de grados a radianes
         float angleRadians = angleDegrees * M_PI / 180.0f;
-
+    
         // Crear una nueva imagen con las mismas dimensiones para almacenar el resultado
         Image rotatedImage;
         rotatedImage.width    = width;
         rotatedImage.height   = height;
         rotatedImage.channels = channels;
         rotatedImage.allocateMemory(usingBuddySystem); // Usar el mismo método de memoria
-
+    
         // Calcular el centro de la imagen
         float centerX = width / 2.0f;
         float centerY = height / 2.0f;
-
+    
         // Calcular la matriz de rotación inversa
         float cosAngle = cos(angleRadians);
         float sinAngle = sin(angleRadians);
-
-        // Para cada píxel en la imagen de salida
-        for (int y = 0; y < height; y++)
+    
+        // Optimizado: procesar la imagen en bloques para mejor uso de caché
+        const int BLOCK_SIZE = 32; // Tamaño óptimo para rotación
+    
+        // Buffers para coordenadas de origen pre-calculadas
+        float* srcX = new float[BLOCK_SIZE * BLOCK_SIZE];
+        float* srcY = new float[BLOCK_SIZE * BLOCK_SIZE];
+        unsigned char* outBuffer = new unsigned char[BLOCK_SIZE * BLOCK_SIZE * channels];
+    
+        #if defined(_OPENMP)
+        if (useParallelization) {
+            #pragma omp parallel for collapse(2) schedule(dynamic, 4) private(srcX, srcY, outBuffer)
+            for (int blockY = 0; blockY < height; blockY += BLOCK_SIZE) {
+                for (int blockX = 0; blockX < width; blockX += BLOCK_SIZE) {
+                    // Crear buffers locales para cada hilo
+                    float localSrcX[BLOCK_SIZE * BLOCK_SIZE];
+                    float localSrcY[BLOCK_SIZE * BLOCK_SIZE];
+                    // Eliminada la variable no utilizada localOutBuffer
+                    
+                    // Definir los límites del bloque
+                    int endY = std::min(blockY + BLOCK_SIZE, height);
+                    int endX = std::min(blockX + BLOCK_SIZE, width);
+                    int blockH = endY - blockY;
+                    int blockW = endX - blockX;
+                    
+                    // Pre-calcular coordenadas de origen para todo el bloque
+                    for (int y = 0; y < blockH; y++) {
+                        for (int x = 0; x < blockW; x++) {
+                            // Coordenadas en la imagen de destino
+                            int destX = blockX + x;
+                            int destY = blockY + y;
+                            
+                            // Trasladar al origen (centro de la imagen)
+                            float xOffset = destX - centerX;
+                            float yOffset = destY - centerY;
+                            
+                            // Aplicar la rotación inversa
+                            localSrcX[y * blockW + x] = xOffset * cosAngle + yOffset * sinAngle + centerX;
+                            localSrcY[y * blockW + x] = -xOffset * sinAngle + yOffset * cosAngle + centerY;
+                        }
+                    }
+                    
+                    // Procesar el bloque completo para todos los canales
+                    for (int y = 0; y < blockH; y++) {
+                        for (int x = 0; x < blockW; x++) {
+                            float xPos = localSrcX[y * blockW + x];
+                            float yPos = localSrcY[y * blockW + x];
+                            
+                            if (xPos < 0 || yPos < 0 || xPos >= width - 1 || yPos >= height - 1) {
+                                for (int c = 0; c < channels; c++) {
+                                    rotatedImage.pixels[blockY + y][blockX + x][c] = 0;
+                                }
+                                continue;
+                            }
+                            
+                            int x1 = static_cast<int>(xPos);
+                            int y1 = static_cast<int>(yPos);
+                            int x2 = x1 + 1;
+                            int y2 = y1 + 1;
+                            
+                            float dx = xPos - x1;
+                            float dy = yPos - y1;
+                            float w1 = (1.0f - dx) * (1.0f - dy);
+                            float w2 = dx * (1.0f - dy);
+                            float w3 = (1.0f - dx) * dy;
+                            float w4 = dx * dy;
+                            
+                            for (int c = 0; c < channels; c++) {
+                                unsigned char p1 = pixels[y1][x1][c];
+                                unsigned char p2 = pixels[y1][x2][c];
+                                unsigned char p3 = pixels[y2][x1][c];
+                                unsigned char p4 = pixels[y2][x2][c];
+                                
+                                float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
+                                rotatedImage.pixels[blockY + y][blockX + x][c] = 
+                                    static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+                            }
+                        }
+                    }
+                }
+            }
+        } else 
+        #endif
         {
-            for (int x = 0; x < width; x++)
-            {
-                // Trasladar al origen (centro de la imagen)
-                float xOffset = x - centerX;
-                float yOffset = y - centerY;
-
-                // Aplicar la rotación inversa
-                float srcX = xOffset * cosAngle + yOffset * sinAngle + centerX;
-                float srcY = -xOffset * sinAngle + yOffset * cosAngle + centerY;
-
-                // Aplicar interpolación bilineal para cada canal
-                for (int c = 0; c < channels; c++)
-                {
-                    rotatedImage.pixels[y][x][c] = bilinearInterpolation(srcX, srcY, c);
+            // Versión secuencial
+            for (int blockY = 0; blockY < height; blockY += BLOCK_SIZE) {
+                for (int blockX = 0; blockX < width; blockX += BLOCK_SIZE) {
+                    // Definir los límites del bloque
+                    int endY = std::min(blockY + BLOCK_SIZE, height);
+                    int endX = std::min(blockX + BLOCK_SIZE, width);
+                    int blockH = endY - blockY;
+                    int blockW = endX - blockX;
+                    
+                    // Pre-calcular coordenadas de origen para todo el bloque
+                    for (int y = 0; y < blockH; y++) {
+                        for (int x = 0; x < blockW; x++) {
+                            // Coordenadas en la imagen de destino
+                            int destX = blockX + x;
+                            int destY = blockY + y;
+                            
+                            // Trasladar al origen (centro de la imagen)
+                            float xOffset = destX - centerX;
+                            float yOffset = destY - centerY;
+                            
+                            // Aplicar la rotación inversa
+                            srcX[y * blockW + x] = xOffset * cosAngle + yOffset * sinAngle + centerX;
+                            srcY[y * blockW + x] = -xOffset * sinAngle + yOffset * cosAngle + centerY;
+                        }
+                    }
+                    
+                    // Procesar el bloque completo
+                    for (int y = 0; y < blockH; y++) {
+                        for (int x = 0; x < blockW; x++) {
+                            // Para cada píxel en el bloque
+                            for (int c = 0; c < channels; c++) {  // Corregido aquí, eliminado el 'a'
+                                rotatedImage.pixels[blockY + y][blockX + x][c] = 
+                                    bilinearInterpolation(srcX[y * blockW + x], srcY[y * blockW + x], c);
+                            }
+                        }
+                    }
                 }
             }
         }
-
+    
+        // Liberar buffers temporales
+        delete[] srcX;
+        delete[] srcY;
+        delete[] outBuffer;
+    
         // Copiar la imagen rotada de vuelta a la imagen original
         *this = rotatedImage;
-
+    
         std::cout << "[INFO] Imagen rotada " << angleDegrees << " grados." << std::endl;
         std::cout << "---------------------------------" << std::endl;
     }
@@ -353,19 +575,79 @@ namespace ImageProcessor
         scaledImage.channels = channels;
         scaledImage.allocateMemory(usingBuddySystem); // Usar el mismo método de memoria
 
-        // Para cada píxel en la imagen de salida
-        for (int y = 0; y < newHeight; y++)
-        {
-            for (int x = 0; x < newWidth; x++)
-            {
-                // Calcular las coordenadas en la imagen original
-                float srcX = x / factor;
-                float srcY = y / factor;
+        // Optimizado: procesar la imagen en bloques para mejor uso de caché
+        const int BLOCK_SIZE = 32; // Tamaño óptimo para escalado
 
-                // Aplicar interpolación bilineal para cada canal
-                for (int c = 0; c < channels; c++)
-                {
-                    scaledImage.pixels[y][x][c] = bilinearInterpolation(srcX, srcY, c);
+        #if defined(_OPENMP)
+        if (useParallelization) {
+            #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+            for (int blockY = 0; blockY < newHeight; blockY += BLOCK_SIZE) {
+                for (int blockX = 0; blockX < newWidth; blockX += BLOCK_SIZE) {
+                    // Definir los límites del bloque
+                    int endY = std::min(blockY + BLOCK_SIZE, newHeight);
+                    int endX = std::min(blockX + BLOCK_SIZE, newWidth);
+                    
+                    for (int y = blockY; y < endY; y++) {
+                        for (int x = blockX; x < endX; x++) {
+                            // Calcular las coordenadas en la imagen original
+                            float srcX = x / factor;
+                            float srcY = y / factor;
+                            
+                            if (srcX < 0 || srcY < 0 || srcX >= width - 1 || srcY >= height - 1) {
+                                for (int c = 0; c < channels; c++) {
+                                    scaledImage.pixels[y][x][c] = 0;
+                                }
+                                continue;
+                            }
+                            
+                            int x1 = static_cast<int>(srcX);
+                            int y1 = static_cast<int>(srcY);
+                            int x2 = x1 + 1;
+                            int y2 = y1 + 1;
+                            
+                            float dx = srcX - x1;
+                            float dy = srcY - y1;
+                            float w1 = (1.0f - dx) * (1.0f - dy);
+                            float w2 = dx * (1.0f - dy);
+                            float w3 = (1.0f - dx) * dy;
+                            float w4 = dx * dy;
+                            
+                            for (int c = 0; c < channels; c++) {
+                                unsigned char p1 = pixels[y1][x1][c];
+                                unsigned char p2 = pixels[y1][x2][c];
+                                unsigned char p3 = pixels[y2][x1][c];
+                                unsigned char p4 = pixels[y2][x2][c];
+                                
+                                float value = w1 * p1 + w2 * p2 + w3 * p3 + w4 * p4;
+                                scaledImage.pixels[y][x][c] = 
+                                    static_cast<unsigned char>(std::max(0.0f, std::min(255.0f, value)));
+                            }
+                        }
+                    }
+                }
+            }
+        } else 
+        #endif
+        {
+            // Versión secuencial con procesamiento por bloques
+            for (int blockY = 0; blockY < newHeight; blockY += BLOCK_SIZE) {
+                for (int blockX = 0; blockX < newWidth; blockX += BLOCK_SIZE) {
+                    // Definir los límites del bloque
+                    int endY = std::min(blockY + BLOCK_SIZE, newHeight);
+                    int endX = std::min(blockX + BLOCK_SIZE, newWidth);
+                    
+                    for (int y = blockY; y < endY; y++) {
+                        for (int x = blockX; x < endX; x++) {
+                            // Calcular las coordenadas en la imagen original
+                            float srcX = x / factor;
+                            float srcY = y / factor;
+                            
+                            // Aplicar interpolación bilineal para cada canal
+                            for (int c = 0; c < channels; c++) {
+                                scaledImage.pixels[y][x][c] = bilinearInterpolation(srcX, srcY, c);
+                            }
+                        }
+                    }
                 }
             }
         }

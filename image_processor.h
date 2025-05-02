@@ -28,6 +28,12 @@ namespace ImageProcessor
             
             // Tamaño total del buffer
             size_t totalBufferSize;
+            
+            // Flag para activar/desactivar paralelización
+            static bool useParallelization;
+            
+            // Número de hilos a utilizar (por defecto 4)
+            static int numThreads;
 
             Image();
             ~Image();
@@ -54,8 +60,15 @@ namespace ImageProcessor
             // Método auxiliar para la interpolación bilineal
             unsigned char bilinearInterpolation(float x, float y, int channel);
             
+            // Optimización de la interpolación para procesar bloques de píxeles
+            void bilinearInterpolationBlock(float* srcX, float* srcY, int startX, int startY, 
+                                           int blockWidth, int blockHeight, unsigned char* output);
+            
             // Obtener estadísticas de memoria del Buddy System
             std::string getMemoryStats() const;
+            
+            // Establecer uso de paralelización y número de hilos
+            static void setParallelization(bool use, int threads = 4);
     };
 
 } // namespace ImageProcessor

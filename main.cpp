@@ -6,16 +6,22 @@
 #include <string>
 #include <chrono>
 
+// Verificar si OpenMP está disponible
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+
 void printUsage(const char *programName)
 {
     std::cout << "Uso: " << programName
-              << " entrada.jpg salida.jpg [-angulo grados] [-escalar factor] [-buddy]" << std::endl;
+              << " entrada.jpg salida.jpg [-angulo grados] [-escalar factor] [-buddy] [-threads on|off]" << std::endl;
     std::cout << "Parámetros:" << std::endl;
     std::cout << "  entrada.jpg: archivo de imagen de entrada" << std::endl;
     std::cout << "  salida.jpg: archivo donde se guarda la imagen procesada" << std::endl;
     std::cout << "  -angulo: define el ángulo de rotación (opcional)" << std::endl;
     std::cout << "  -escalar: define el factor de escalado (opcional)" << std::endl;
     std::cout << "  -buddy: activa el modo Buddy System (opcional)" << std::endl;
+    std::cout << "  -threads: activa (on) o desactiva (off) paralelización con OpenMP (opcional)" << std::endl;
 }
 
 int main(int argc, char *argv[])
@@ -32,6 +38,7 @@ int main(int argc, char *argv[])
     float rotationAngle  = 0.0f;
     float scaleFactor    = 1.0f;
     bool  useBuddySystem = false;
+    bool  useThreads     = true;
 
     for (int i = 3; i < argc; i++)
     {
@@ -49,7 +56,27 @@ int main(int argc, char *argv[])
         {
             useBuddySystem = true;
         }
+        else if (strcmp(argv[i], "-threads") == 0 && i + 1 < argc)
+        {
+            if (strcmp(argv[i + 1], "on") == 0)
+            {
+                useThreads = true;
+            }
+            else if (strcmp(argv[i + 1], "off") == 0)
+            {
+                useThreads = false;
+            }
+            else
+            {
+                std::cerr << "Valor no válido para -threads. Use 'on' u 'off'." << std::endl;
+                return 1;
+            }
+            i++;
+        }
     }
+
+    // Configurar paralelización basado en los argumentos
+    ImageProcessor::Image::setParallelization(useThreads, 4);
 
     if (!FileIO::isValidImageFile(inputFile))
     {
@@ -72,6 +99,7 @@ int main(int argc, char *argv[])
     std::cout << "Archivo de entrada: " << inputFile << std::endl;
     std::cout << "Archivo de salida: " << outputFile << std::endl;
     std::cout << "Modo de asignación de memoria: " << (useBuddySystem ? "Buddy System" : "Convencional") << std::endl;
+    std::cout << "Paralelización OpenMP: " << (useThreads ? "Activada" : "Desactivada") << std::endl;
     std::cout << "------------------------" << std::endl;
     std::cout << "Dimensiones originales: " << image.width << " x " << image.height << std::endl;
     std::cout << image.getInfo() << std::endl;
